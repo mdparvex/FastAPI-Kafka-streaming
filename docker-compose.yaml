@@ -1,0 +1,88 @@
+version: '3.8'
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    env_file:
+      - .env
+    # environment:
+    #   ZOOKEEPER_CLIENT_PORT: 2181
+    #   ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - kafka_network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.0.1
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"   # internal listener used by other containers
+      - "29092:29092" # host-accessible broker (optional)
+    env_file:
+      - .env
+    # environment:
+    #   KAFKA_BROKER_ID: 1
+    #   KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+
+    #   # LISTENERS defines addresses broker listens on
+    #   KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+
+    #   # ADVERTISED_LISTENERS tells clients how to reach the broker:
+    #   # - inside Docker network other containers use kafka:9092
+    #   # - host (localhost) can reach via localhost:29092 (port mapped above)
+    #   KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+
+    #   KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+    #   KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+    #   KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    #   KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+    networks:
+      - kafka_network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9092' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    volumes:
+      - ./create-topics.sh:/etc/confluent/docker/create-topics.sh:ro
+    command: ["bash", "/etc/confluent/docker/create-topics.sh"]
+
+  producer:
+    build: ./producer
+    container_name: producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    networks:
+      - kafka_network
+    restart: unless-stopped
+
+  consumer:
+    build: ./consumer
+    container_name: consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    env_file:
+      - .env
+    ports:
+      - "8001:8001"
+    networks:
+      - kafka_network
+    restart: unless-stopped
+
+networks:
+  kafka_network:
+    driver: bridge
